@@ -19,8 +19,7 @@ class SaleOrderLine(models.Model):
     contract_template_id = fields.Many2one(
         comodel_name='contract.template',
         string='Contract Template',
-        related='product_id.product_tmpl_id.contract_template_id',
-        readonly=True,
+        compute='_compute_contract_template_id',
     )
     recurring_rule_type = fields.Selection(
         [
@@ -50,6 +49,25 @@ class SaleOrderLine(models.Model):
         required=False,
         copy=False,
     )
+
+    @api.constrains('contract_id')
+    def check_contact_is_not_terminated(self):
+        for rec in self:
+            if (
+                rec.order_id.state not in ('sale', 'done', 'cancel')
+                and rec.contract_id.is_terminated
+            ):
+                raise ValidationError(
+                    _("You can't upsell or downsell a terminated contract")
+                )
+
+    @api.multi
+    @api.depends('product_id')
+    def _compute_contract_template_id(self):
+        for rec in self:
+            rec.contract_template_id = rec.product_id.with_context(
+                force_company=rec.order_id.company_id.id
+            ).property_contract_template_id
 
     @api.multi
     def _get_auto_renew_rule_type(self):
@@ -154,6 +172,7 @@ class SaleOrderLine(models.Model):
             'contract_id': contract.id,
             'sale_order_line_id': self.id,
             'predecessor_contract_line_id': predecessor_contract_line_id,
+            'analytic_account_id': self.order_id.analytic_account_id.id,
         }
 
     @api.multi
